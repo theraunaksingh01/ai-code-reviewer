@@ -47,6 +47,14 @@ async def github_webhook(request: Request, background_tasks: BackgroundTasks):
     if event_type == "pull_request":
         action = payload.get("action")
         
+        # Auto-index merged PRs to keep RAG updated
+        if action == "closed":
+            if payload["pull_request"].get("merged"):
+                pr_number = payload["pull_request"]["number"]
+                repo_name = payload["repository"]["full_name"]
+                print(f"📚 PR #{pr_number} merged — indexing for RAG")
+                background_tasks.add_task(index_merged_pr_task, repo_name, pr_number)
+        
         # Trigger review when PR is opened or new commits are pushed
         if action in ["opened", "synchronize", "reopened"]:
             pr_number = payload["pull_request"]["number"]
@@ -123,6 +131,9 @@ async def handle_pr_review(repo_name: str, pr_number: int):
         import traceback
         traceback.print_exc()
 
+async def index_merged_pr_task(repo_name: str, pr_number: int):
+    from app.rag.indexer import index_single_merged_pr
+    index_single_merged_pr(repo_name, pr_number)
 
 @app.get("/health")
 async def health_check():

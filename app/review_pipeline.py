@@ -55,9 +55,12 @@ RULES:
 - Always provide the fixed code, not just a description of the problem
 - Categorize severity honestly: CRITICAL (security/data loss), HIGH (bugs), MEDIUM (performance), LOW (style)
 - Set confidence between 0.0 and 1.0 based on how certain you are
+- If similar issues were found in past PRs, mention it specifically
 - If the code looks good, say so in the summary — don't invent issues
 
 {security_context}
+
+{rag_context}
 
 Respond ONLY with valid JSON matching this format:
 {format_instructions}
@@ -87,22 +90,26 @@ def format_files_for_prompt(files: list) -> str:
 
 
 async def review_pull_request(pr_data: dict) -> dict:
-    """Main function — takes PR data and returns a full review."""
     
-    # Step 1 — Run static security analysis on every file
+    # Step 1 — Static security scan (unchanged)
     all_security_issues = []
     for file in pr_data["files"]:
         issues = scan_file_for_security_issues(file["filename"], file["patch"])
         all_security_issues.extend(issues)
-    
     security_context = format_security_issues_for_ai(all_security_issues)
-    
-    # Step 2 — Format files for the AI prompt
+
+    # Step 2 — RAG: Get codebase history context (NEW)
+    from app.rag.retriever import get_relevant_context
+    query = f"{pr_data['pr_title']} {' '.join([f['filename'] for f in pr_data['files']])}"
+    rag_context = get_relevant_context(query)
+    print(f"📚 RAG context retrieved: {len(rag_context)} chars")
+
+    # Step 3 — Format files
     files_content = format_files_for_prompt(pr_data["files"])
-    
-    # Step 3 — Run AI review
+
+    # Step 4 — AI review with RAG context injected
     chain = REVIEW_PROMPT | llm | parser
-    
+
     try:
         result = await chain.ainvoke({
             "pr_title": pr_data["pr_title"],
@@ -110,6 +117,7 @@ async def review_pull_request(pr_data: dict) -> dict:
             "base_branch": pr_data["base_branch"],
             "files_content": files_content,
             "security_context": security_context,
+            "rag_context": rag_context,        # NEW
             "format_instructions": parser.get_format_instructions()
         })
     except Exception as e:
@@ -119,10 +127,9 @@ async def review_pull_request(pr_data: dict) -> dict:
             "verdict": "COMMENT",
             "comments": []
         }
-    
-    # Step 4 — Merge static security findings with AI findings
+
+    # Step 5 — Merge static findings
     for issue in all_security_issues:
-    # Find which file this issue belongs to
         affected_file = pr_data["files"][0]["filename"] if pr_data["files"] else "unknown"
         result["comments"].append({
             "filename": affected_file,
@@ -133,5 +140,5 @@ async def review_pull_request(pr_data: dict) -> dict:
             "suggestion": issue.recommendation,
             "confidence": 0.95
         })
-    
+
     return result
