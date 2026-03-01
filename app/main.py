@@ -5,9 +5,16 @@ import os
 from fastapi import FastAPI, Request, HTTPException, BackgroundTasks
 from dotenv import load_dotenv
 
+from app.database import create_tables
+
+
 load_dotenv()
 
 app = FastAPI(title="AI Code Reviewer")
+
+@app.on_event("startup")
+async def startup():
+    create_tables()
 
 WEBHOOK_SECRET = os.getenv("GITHUB_WEBHOOK_SECRET")
 
@@ -124,6 +131,64 @@ async def handle_pr_review(repo_name: str, pr_number: int):
 *🤖 Reviewed by AI Code Reviewer | {len(review['comments'])} issue(s) found*"""
 
         post_review_comment(repo_name, pr_number, formatted_comments, summary)
+        
+        # Save review to database
+        from app.database import SessionLocal, PRReview as PRReviewModel, ReviewComment as ReviewCommentModel, calculate_quality_score
+        
+        db = SessionLocal()
+        try:
+            # Count issues by severity
+            severity_counts = {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0}
+            for c in review["comments"]:
+                sev = c.get("severity", "LOW")
+                if sev in severity_counts:
+                    severity_counts[sev] += 1
+        
+            quality_score = calculate_quality_score(
+                severity_counts["CRITICAL"],
+                severity_counts["HIGH"],
+                severity_counts["MEDIUM"],
+                severity_counts["LOW"]
+            )
+        
+            # Save PR review
+            pr_review = PRReviewModel(
+                pr_number=pr_number,
+                pr_title=pr_data["pr_title"],
+                pr_author=pr_data.get("pr_author", "unknown"),
+                verdict=review["verdict"],
+                summary=review["summary"],
+                quality_score=quality_score,
+                critical_count=severity_counts["CRITICAL"],
+                high_count=severity_counts["HIGH"],
+                medium_count=severity_counts["MEDIUM"],
+                low_count=severity_counts["LOW"]
+            )
+            db.add(pr_review)
+            db.flush()
+        
+            # Save individual comments
+            for comment in review["comments"]:
+                db_comment = ReviewCommentModel(
+                    review_id=pr_review.id,
+                    filename=comment.get("filename", "unknown"),
+                    line_number=comment.get("line", 0),
+                    severity=comment.get("severity", "LOW"),
+                    category=comment.get("category", "General"),
+                    issue=comment.get("issue", ""),
+                    suggestion=comment.get("suggestion", ""),
+                    confidence=comment.get("confidence", 0.8)
+                )
+                db.add(db_comment)
+        
+            db.commit()
+            print(f"💾 Review saved to database — Quality Score: {quality_score}/100")
+
+        except Exception as e:
+            print(f"❌ Database save failed: {e}")
+            db.rollback()
+        finally:
+            db.close()
         print("Step 4: ✅ Comments posted successfully")
 
     except Exception as e:

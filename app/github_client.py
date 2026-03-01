@@ -44,6 +44,7 @@ def get_pr_diff(repo_name: str, pr_number: int):
         "pr_body": pr.body or "",
         "base_branch": pr.base.ref,
         "head_branch": pr.head.ref,
+        "pr_author": pr.user.login,   
         "files": files
     }
 
