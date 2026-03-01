@@ -6,11 +6,16 @@ from fastapi import FastAPI, Request, HTTPException, BackgroundTasks
 from dotenv import load_dotenv
 
 from app.database import create_tables
+from app.api_routes import router as api_router
+
 
 
 load_dotenv()
 
 app = FastAPI(title="AI Code Reviewer")
+
+app.include_router(api_router, prefix="/api")
+
 
 @app.on_event("startup")
 async def startup():
