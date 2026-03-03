@@ -1,0 +1,25 @@
+@import "tailwindcss";
+
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background: #ffffff;
+  color: #0a0a0a;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow-x: hidden;
+}
+
+/* Framer Motion scroll trigger fix — ensure elements are visible on first paint if JS disabled */
+[data-framer-motion-reduced-motion] {
+  opacity: 1 !important;
+  transform: none !important;
+}
