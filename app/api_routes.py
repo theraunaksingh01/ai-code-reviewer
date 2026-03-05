@@ -1,5 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import RedirectResponse
+from groq import BaseModel
+from groq import BaseModel
 from sqlalchemy.orm import Session
 from app.database import get_db, User, Repository, PRReview, ReviewComment, DeveloperScore
 from app.auth import (
@@ -7,10 +9,17 @@ from app.auth import (
     get_github_user_repos, create_jwt_token, get_current_user
 )
 import os
+import logging
+from app.auto_fix import create_fix_pr as _create_fix_pr
+from app.github_client import get_installation_token
+
+logger = logging.getLogger(__name__)
+
 
 router = APIRouter()
 
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
+
 
 
 # ── Auth Routes ───────────────────────────────────────────
@@ -274,3 +283,77 @@ async def get_security_heatmap(
     sorted_heatmap = sorted(heatmap.items(), key=lambda x: x[1]["total"], reverse=True)
     
     return [{"filename": k, **v} for k, v in sorted_heatmap]
+
+# --- AUTO-FIX ENDPOINT ---
+from app.auto_fix import create_fix_pr as _create_fix_pr
+from pydantic import BaseModel
+
+class FixPRRequest(BaseModel):
+    repo_full_name: str
+    pr_number: int
+    installation_id: int
+
+@router.post("/fix-pr")
+async def fix_pr(req: FixPRRequest, current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Trigger auto-fix for a reviewed PR."""
+    import logging
+    logger = logging.getLogger(__name__)
+
+    try:
+        from app.database import PRReview, ReviewComment
+        from app.github_client import get_installation_token
+        from github import Github
+
+        review = db.query(PRReview).filter(
+            PRReview.pr_number == req.pr_number
+        ).order_by(PRReview.reviewed_at.desc()).first()
+
+        if not review:
+            raise HTTPException(status_code=404, detail="No review found for this PR")
+
+        comments = db.query(ReviewComment).filter(
+            ReviewComment.review_id == review.id
+        ).all()
+
+        if not comments:
+            raise HTTPException(status_code=400, detail="No issues found to fix")
+
+        # Group issues by file
+        issues_by_file = {}
+        for c in comments:
+            issues_by_file.setdefault(c.filename, []).append({
+                "line": c.line_number,
+                "severity": c.severity,
+                "issue": c.issue,
+                "fix_suggestion": c.suggestion   # ✅ matches your DB column name
+            })
+
+        inst_token = get_installation_token(req.installation_id)
+        g = Github(inst_token)
+        repo = g.get_repo(req.repo_full_name)
+        pr = repo.get_pull(req.pr_number)
+
+        file_contents = {}
+        for filename in issues_by_file:
+            try:
+                content_obj = repo.get_contents(filename, ref=pr.head.sha)
+                file_contents[filename] = content_obj.decoded_content.decode("utf-8")
+            except Exception as e:
+                logger.warning(f"Could not fetch {filename}: {e}")
+
+        result = _create_fix_pr(
+            installation_token=inst_token,
+            repo_full_name=req.repo_full_name,
+            pr_number=req.pr_number,
+            pr_head_sha=pr.head.sha,
+            pr_head_branch=pr.base.ref,
+            issues_by_file=issues_by_file,
+            file_contents=file_contents
+        )
+
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

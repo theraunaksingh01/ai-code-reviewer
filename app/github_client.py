@@ -23,9 +23,28 @@ def get_github_client(repo_name: str):
     return Github(access_token)
 
 
+def get_installation_id(repo_name: str) -> int:
+    """Get the installation ID for a repo."""
+    integration = GithubIntegration(APP_ID, PRIVATE_KEY)
+    owner, repo = repo_name.split("/")
+    installation = integration.get_installation(owner, repo)
+    return installation.id
+
+
+def get_installation_token(installation_id: int) -> str:
+    """Get a fresh access token for a given installation ID."""
+    integration = GithubIntegration(APP_ID, PRIVATE_KEY)
+    return integration.get_access_token(installation_id).token
+
+
 def get_pr_diff(repo_name: str, pr_number: int):
     """Fetch all changed files and their diffs from a PR."""
-    client = get_github_client(repo_name)
+    integration = GithubIntegration(APP_ID, PRIVATE_KEY)
+    owner, repo_short = repo_name.split("/")
+    installation = integration.get_installation(owner, repo_short)
+    installation_id = installation.id
+    access_token = integration.get_access_token(installation_id).token
+    client = Github(access_token)
     repo = client.get_repo(repo_name)
     pr = repo.get_pull(pr_number)
     
@@ -44,7 +63,8 @@ def get_pr_diff(repo_name: str, pr_number: int):
         "pr_body": pr.body or "",
         "base_branch": pr.base.ref,
         "head_branch": pr.head.ref,
-        "pr_author": pr.user.login,   
+        "pr_author": pr.user.login,  
+        "installation_id": installation_id, 
         "files": files
     }
 

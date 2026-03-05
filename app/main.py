@@ -198,6 +198,51 @@ async def handle_pr_review(repo_name: str, pr_number: int):
         
             db.commit()
             print(f"💾 Review saved to database — Quality Score: {quality_score}/100")
+            
+            # Auto-fix: trigger if CRITICAL or HIGH issues found
+            if severity_counts["CRITICAL"] + severity_counts["HIGH"] > 0:
+                try:
+                    from app.auto_fix import create_fix_pr
+                    from app.github_client import get_installation_token
+                    from github import Github
+
+                    print(f"🔧 Auto-fix triggered for PR #{pr_number}")
+
+                    issues_by_file = {}
+                    for comment in review["comments"]:
+                        fname = comment.get("filename")
+                        if fname:
+                            issues_by_file.setdefault(fname, []).append(comment)
+
+                    # Get installation_id from webhook payload (passed through pr_data)
+                    installation_id = pr_data.get("installation_id")
+                    inst_token = get_installation_token(installation_id)
+
+                    g = Github(inst_token)
+                    repo_obj = g.get_repo(repo_name)
+                    pr_obj = repo_obj.get_pull(pr_number)
+
+                    file_contents = {}
+                    for filename in issues_by_file:
+                        try:
+                            content_obj = repo_obj.get_contents(filename, ref=pr_obj.head.sha)
+                            file_contents[filename] = content_obj.decoded_content.decode("utf-8")
+                        except Exception as fe:
+                            print(f"⚠️ Could not fetch {filename}: {fe}")
+
+                    fix_result = create_fix_pr(
+                        installation_token=inst_token,
+                        repo_full_name=repo_name,
+                        pr_number=pr_number,
+                        pr_head_sha=pr_obj.head.sha,
+                        pr_head_branch=pr_obj.base.ref,
+                        issues_by_file=issues_by_file,
+                        file_contents=file_contents
+                    )
+                    print(f"✅ Auto-fix result: {fix_result}")
+
+                except Exception as fix_err:
+                    print(f"⚠️ Auto-fix failed (non-fatal): {fix_err}")
 
         except Exception as e:
             print(f"❌ Database save failed: {e}")
