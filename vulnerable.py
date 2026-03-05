@@ -7,10 +7,14 @@ import subprocess
 import shlex
 
 API_KEY = os.environ.get('API_KEY')
+if not API_KEY:
+    raise ValueError("API_KEY environment variable is not set")
 
 def get_user(user_id):
     if not isinstance(user_id, int) or user_id < 0:
         raise ValueError("Invalid user_id")
+    if user_id > 2**31-1:
+        raise ValueError("user_id is too large")
     conn = sqlite3.connect("users.db")
     cursor = conn.cursor()
     cursor.execute("SELECT * FROM users WHERE id = ?", (user_id,))
@@ -27,13 +31,14 @@ def load_data(file_path):
 
 def secure_load_data(file_path, secret_key):
     with open(file_path, "rb") as f:
+        data = f.read(32)
+        mac = data
+        f.seek(0)
         data = f.read()
-        mac = data[:32]
-        data = data[32:]
-        expected_mac = hmac.new(secret_key, data, hashlib.sha256).digest()
+        expected_mac = hmac.new(secret_key, data[32:], hashlib.sha256).digest()
         if not hmac.compare_digest(mac, expected_mac):
             raise ValueError("Invalid MAC")
-        return json.loads(data)
+        return json.loads(data[32:])
 
 def secure_save_data(file_path, data, secret_key):
     data_bytes = json.dumps(data).encode()
