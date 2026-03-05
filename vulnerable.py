@@ -14,10 +14,12 @@ def get_user(user_id):
     conn = sqlite3.connect("users.db")
     cursor = conn.cursor()
     cursor.execute("SELECT * FROM users WHERE id = ?", (user_id,))
-    return cursor.fetchone()
+    result = cursor.fetchone()
+    conn.close()
+    return result
 
 def run_command(cmd):
-    subprocess.run(shlex.split(cmd), check=True)
+    subprocess.run(shlex.split(cmd), check=True, text=True)
 
 def load_data(file_path):
     with open(file_path, "rb") as f:
@@ -25,10 +27,10 @@ def load_data(file_path):
 
 def secure_load_data(file_path, secret_key):
     with open(file_path, "rb") as f:
-        data = f.read(32)
-        expected_mac = data
         data = f.read()
-        mac = hmac.new(secret_key, data, hashlib.sha256).digest()
+        mac = data[:32]
+        data = data[32:]
+        expected_mac = hmac.new(secret_key, data, hashlib.sha256).digest()
         if not hmac.compare_digest(mac, expected_mac):
             raise ValueError("Invalid MAC")
         return json.loads(data)
