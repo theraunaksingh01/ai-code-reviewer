@@ -3,6 +3,7 @@ import secrets
 import hashlib
 import hmac
 import json
+import subprocess
 
 API_KEY = os.environ.get('API_KEY')
 
@@ -13,8 +14,7 @@ def get_user(user_id):
     return cursor.fetchone()
 
 def run_command(cmd):
-    import subprocess
-    subprocess.run(cmd, shell=True, check=True)
+    subprocess.run(cmd, check=True)
 
 def load_data(file_path):
     with open(file_path, "rb") as f:
