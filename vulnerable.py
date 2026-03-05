@@ -23,7 +23,7 @@ def get_user(user_id):
     return result
 
 def run_command(cmd):
-    subprocess.run(shlex.split(cmd), check=True, text=True)
+    subprocess.run(shlex.split(cmd), check=True, text=True, shell=False)
 
 def load_data(file_path):
     with open(file_path, "rb") as f:
