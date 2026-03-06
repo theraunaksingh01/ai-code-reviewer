@@ -5,7 +5,7 @@ import { useSearchParams, useRouter } from "next/navigation";
 import {
   Shield, GitPullRequest, AlertTriangle, CheckCircle,
   XCircle, TrendingUp, Code2, LogOut, Activity,
-  MessageSquare, Clock, ChevronRight, Zap, Lock
+  MessageSquare, Clock, Zap, Lock, GitBranch, Globe
 } from "lucide-react";
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid,
@@ -170,6 +170,60 @@ function Empty({ Icon, msg }: { Icon: any; msg: string }) {
   );
 }
 
+// ─── Repo Row ─────────────────────────────────────────────
+function RepoRow({ repo, isConnected, isConnecting, onConnect }: any) {
+  const [hov, setHov] = useState(false);
+  return (
+    <div
+      onMouseEnter={() => setHov(true)}
+      onMouseLeave={() => setHov(false)}
+      style={{
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+        padding: "13px 16px", borderRadius: 12,
+        background: isConnected ? C.accentDim : hov ? C.surfaceHover : "transparent",
+        border: `1px solid ${isConnected ? C.accent + "30" : hov ? C.borderHover : C.border}`,
+        transition: "all 0.15s",
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <div style={{ width: 34, height: 34, borderRadius: 9, background: isConnected ? C.accentDim : C.textFaint, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          {isConnected ? <Shield size={15} color={C.accent} /> : <GitBranch size={15} color={C.textDim} />}
+        </div>
+        <div>
+          <p style={{ fontWeight: 600, fontSize: 13, margin: 0, color: C.text }}>{repo.full_name}</p>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 3 }}>
+            {repo.language && <span style={{ fontSize: 11, color: C.textDim }}>⬡ {repo.language}</span>}
+            {repo.private && <span style={{ fontSize: 10, color: C.textFaint, background: C.textFaint, padding: "1px 6px", borderRadius: 4 }}>Private</span>}
+          </div>
+        </div>
+      </div>
+      {isConnected ? (
+        <Pill color={C.accent} bg="rgba(0,255,136,0.08)">✓ Connected</Pill>
+      ) : (
+        <button
+          onClick={onConnect}
+          disabled={isConnecting}
+          style={{
+            background: isConnecting ? C.textFaint : C.accent,
+            color: isConnecting ? C.textDim : "#000",
+            border: "none", borderRadius: 9, padding: "8px 16px",
+            fontSize: 12, fontWeight: 700, cursor: isConnecting ? "not-allowed" : "pointer",
+            fontFamily: "'DM Sans', sans-serif", transition: "all 0.15s",
+            display: "flex", alignItems: "center", gap: 6,
+            boxShadow: isConnecting ? "none" : `0 0 16px ${C.accentGlow}`,
+          }}
+        >
+          {isConnecting ? (
+            <><div style={{ width: 12, height: 12, borderRadius: "50%", border: `2px solid ${C.textDim}`, borderTopColor: C.text, animation: "spin 0.8s linear infinite" }} /> Connecting...</>
+          ) : (
+            <><Zap size={12} /> Connect</>
+          )}
+        </button>
+      )}
+    </div>
+  );
+}
+
 // ─── Review Row (extracted to fix Rules of Hooks) ────────
 function ReviewRow({ r, isLast }: { r: any; isLast: boolean }) {
   const [hov, setHov] = useState(false);
@@ -227,11 +281,19 @@ export default function Dashboard() {
   const [heatmap, setHeatmap] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState("reviews");
+  const [availableRepos, setAvailableRepos] = useState<any[]>([]);
+  const [connectedRepos, setConnectedRepos] = useState<any[]>([]);
+  const [reposLoading, setReposLoading] = useState(false);
+  const [connectingRepo, setConnectingRepo] = useState<string | null>(null);
+  const [repoSearch, setRepoSearch] = useState("");
+
+  const tokenRef = useRef<string>("");
 
   useEffect(() => {
     const t = searchParams.get("token") || localStorage.getItem("cs_token");
     if (!t) { router.push("/"); return; }
     localStorage.setItem("cs_token", t);
+    tokenRef.current = t;
     const headers = { Authorization: `Bearer ${t}` };
     Promise.all([
       axios.get(`${API}/api/auth/me`, { headers }),
@@ -241,9 +303,49 @@ export default function Dashboard() {
     ]).then(([u, o, r, h]) => {
       setUser(u.data); setOverview(o.data);
       setReviews(r.data); setHeatmap(h.data);
-    }).catch(() => router.push("/"))
-      .finally(() => setLoading(false));
+    }).catch((err) => {
+      console.error("Dashboard load error:", err);
+      // Only redirect if it's an auth error (401), not other failures
+      if (err?.response?.status === 401) {
+        localStorage.removeItem("cs_token");
+        router.push("/");
+      }
+    }).finally(() => setLoading(false));
   }, []);
+
+  // Load repos when repos tab is opened
+  useEffect(() => {
+    if (tab !== "repos") return;
+    if (availableRepos.length > 0) return; // already loaded
+    setReposLoading(true);
+    const headers = { Authorization: `Bearer ${tokenRef.current}` };
+    Promise.all([
+      axios.get(`${API}/api/repos/available`, { headers }),
+      axios.get(`${API}/api/repos`, { headers }),
+    ]).then(([avail, connected]) => {
+      setAvailableRepos(avail.data);
+      setConnectedRepos(connected.data);
+    }).catch(console.error)
+      .finally(() => setReposLoading(false));
+  }, [tab]);
+
+  const connectRepo = async (repo: any) => {
+    setConnectingRepo(repo.full_name);
+    try {
+      await axios.post(`${API}/api/repos/connect`, {
+        full_name: repo.full_name,
+        github_repo_id: repo.github_repo_id,
+        language: repo.language,
+      }, { headers: { Authorization: `Bearer ${tokenRef.current}` } });
+      // Refresh connected repos
+      const res = await axios.get(`${API}/api/repos`, { headers: { Authorization: `Bearer ${tokenRef.current}` } });
+      setConnectedRepos(res.data);
+    } catch (e: any) {
+      alert(e?.response?.data?.detail || "Failed to connect repo");
+    } finally {
+      setConnectingRepo(null);
+    }
+  };
 
   if (loading) return (
     <div style={{ minHeight: "100vh", background: C.bg, display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 16 }}>
@@ -349,6 +451,7 @@ export default function Dashboard() {
           <Tab label="PR Reviews" active={tab === "reviews"} onClick={() => setTab("reviews")} />
           <Tab label="Quality Trends" active={tab === "trends"} onClick={() => setTab("trends")} />
           <Tab label="Security Heatmap" active={tab === "security"} onClick={() => setTab("security")} />
+          <Tab label="Repositories" active={tab === "repos"} onClick={() => setTab("repos")} />
         </div>
 
         {/* ── PR Reviews ── */}
@@ -486,6 +589,123 @@ export default function Dashboard() {
             )}
           </div>
         )}
+
+        {/* ── Repositories ── */}
+        {tab === "repos" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 20 }} className="fade-up">
+
+            {/* Connected repos */}
+            <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 20, overflow: "hidden" }}>
+              <div style={{ padding: "20px 24px", borderBottom: `1px solid ${C.border}`, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <div>
+                  <h2 style={{ fontFamily: "'Outfit', sans-serif", fontWeight: 700, fontSize: 17, margin: 0 }}>Connected Repositories</h2>
+                  <p style={{ color: C.textDim, fontSize: 13, marginTop: 3 }}>Repos where CodeSentinel is actively reviewing PRs</p>
+                </div>
+                <Pill color={C.accent} bg={C.accentDim}>{connectedRepos.length} active</Pill>
+              </div>
+              {connectedRepos.length === 0 ? (
+                <Empty Icon={Code2} msg="No repos connected yet — connect one below" />
+              ) : (
+                <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 10 }}>
+                  {connectedRepos.map((repo: any) => (
+                    <div key={repo.id} style={{
+                      display: "flex", alignItems: "center", justifyContent: "space-between",
+                      padding: "14px 16px", borderRadius: 14,
+                      background: C.accentDim, border: `1px solid ${C.accent}20`,
+                    }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                        <div style={{ width: 36, height: 36, borderRadius: 10, background: C.accentDim, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                          <Shield size={16} color={C.accent} />
+                        </div>
+                        <div>
+                          <p style={{ fontWeight: 600, fontSize: 14, margin: 0, color: C.text }}>{repo.full_name}</p>
+                          <p style={{ fontSize: 12, color: C.textDim, marginTop: 2 }}>
+                            {repo.language && <span style={{ marginRight: 12 }}>⬡ {repo.language}</span>}
+                            {repo.total_reviews} PR{repo.total_reviews !== 1 ? "s" : ""} reviewed
+                          </p>
+                        </div>
+                      </div>
+                      <Pill color={C.accent} bg="rgba(0,255,136,0.08)">✓ Active</Pill>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Available repos */}
+            <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 20, overflow: "hidden" }}>
+              <div style={{ padding: "20px 24px", borderBottom: `1px solid ${C.border}` }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+                  <div>
+                    <h2 style={{ fontFamily: "'Outfit', sans-serif", fontWeight: 700, fontSize: 17, margin: 0 }}>Available Repositories</h2>
+                    <p style={{ color: C.textDim, fontSize: 13, marginTop: 3 }}>Your GitHub repos — click Connect to enable AI reviews</p>
+                  </div>
+                  <Pill color={C.textMid} bg={C.textFaint}>{availableRepos.length} repos</Pill>
+                </div>
+                <input
+                  value={repoSearch}
+                  onChange={e => setRepoSearch(e.target.value)}
+                  placeholder="Search repositories..."
+                  style={{
+                    width: "100%", background: C.bg, border: `1px solid ${C.border}`,
+                    borderRadius: 10, padding: "10px 14px", color: C.text,
+                    fontSize: 13, outline: "none", fontFamily: "'DM Sans', sans-serif",
+                    transition: "border-color 0.2s",
+                  }}
+                  onFocus={e => (e.target.style.borderColor = C.accent)}
+                  onBlur={e => (e.target.style.borderColor = C.border)}
+                />
+              </div>
+              {reposLoading ? (
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: 48, gap: 12 }}>
+                  <div style={{ width: 20, height: 20, borderRadius: "50%", border: `2px solid ${C.border}`, borderTopColor: C.accent, animation: "spin 0.8s linear infinite" }} />
+                  <span style={{ color: C.textDim, fontSize: 13 }}>Loading your repositories...</span>
+                  <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+                </div>
+              ) : availableRepos.length === 0 ? (
+                <Empty Icon={GitPullRequest} msg="No repositories found" />
+              ) : (
+                <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 8, maxHeight: 480, overflowY: "auto" }}>
+                  {availableRepos
+                    .filter(r => r.full_name.toLowerCase().includes(repoSearch.toLowerCase()))
+                    .map((repo: any) => {
+                      const isConnected = connectedRepos.some((c: any) => c.full_name === repo.full_name);
+                      const isConnecting = connectingRepo === repo.full_name;
+                      return (
+                        <RepoRow
+                          key={repo.full_name}
+                          repo={repo}
+                          isConnected={isConnected}
+                          isConnecting={isConnecting}
+                          onConnect={() => connectRepo(repo)}
+                        />
+                      );
+                    })}
+                </div>
+              )}
+            </div>
+
+            {/* Install hint */}
+            <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 20, padding: 24 }}>
+              <div style={{ display: "flex", alignItems: "flex-start", gap: 16 }}>
+                <div style={{ width: 40, height: 40, borderRadius: 12, background: C.blueDim, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                  <Zap size={18} color={C.blue} />
+                </div>
+                <div>
+                  <h3 style={{ fontFamily: "'Outfit', sans-serif", fontWeight: 700, fontSize: 15, margin: "0 0 6px 0" }}>Don't see your repo?</h3>
+                  <p style={{ color: C.textDim, fontSize: 13, lineHeight: 1.6, margin: "0 0 14px 0" }}>
+                    Make sure the CodeSentinel GitHub App is installed on your account and granted access to your repositories.
+                  </p>
+                  <a href="https://github.com/apps" target="_blank" rel="noopener noreferrer"
+                    style={{ display: "inline-flex", alignItems: "center", gap: 6, background: C.blue, color: "#fff", borderRadius: 10, padding: "9px 16px", fontSize: 13, fontWeight: 600, cursor: "pointer", textDecoration: "none", fontFamily: "'DM Sans', sans-serif" }}>
+                    <Shield size={14} /> Install GitHub App →
+                  </a>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
       </div>
     </div>
   );
