@@ -160,7 +160,13 @@ async def get_overview(
     repos = db.query(Repository).filter(Repository.user_id == user.id).all()
     repo_ids = [r.id for r in repos]
     
-    reviews = db.query(PRReview).filter(PRReview.repository_id.in_(repo_ids)).all()
+    from sqlalchemy import or_
+    reviews = db.query(PRReview).filter(
+        or_(
+            PRReview.repository_id.in_(repo_ids),
+            PRReview.repository_id == None
+        )
+    ).all()
     
     total_reviews = len(reviews)
     total_critical = sum(r.critical_count for r in reviews)
@@ -191,9 +197,13 @@ async def get_reviews(
     repos = db.query(Repository).filter(Repository.user_id == user.id).all()
     repo_ids = [r.id for r in repos]
     
+    from sqlalchemy import or_
     reviews = db.query(PRReview).filter(
-        PRReview.repository_id.in_(repo_ids)
-    ).order_by(PRReview.reviewed_at.desc()).limit(50).all()
+        or_(
+            PRReview.repository_id.in_(repo_ids),
+            PRReview.repository_id == None
+        )
+    ).all()
     
     return [{
         "id": r.id,
@@ -259,7 +269,13 @@ async def get_security_heatmap(
     repos = db.query(Repository).filter(Repository.user_id == user.id).all()
     repo_ids = [r.id for r in repos]
     
-    reviews = db.query(PRReview).filter(PRReview.repository_id.in_(repo_ids)).all()
+    from sqlalchemy import or_
+    reviews = db.query(PRReview).filter(
+        or_(
+            PRReview.repository_id.in_(repo_ids),
+            PRReview.repository_id == None
+        )
+    ).all()
     review_ids = [r.id for r in reviews]
     
     comments = db.query(ReviewComment).filter(

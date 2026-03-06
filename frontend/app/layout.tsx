@@ -1,4 +1,6 @@
 import type { Metadata } from "next";
+// @ts-ignore
+import "./globals.css";
 
 export const metadata: Metadata = {
   title: "CodeSentinel — AI Code Review Platform",
@@ -12,7 +14,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
         <link
-          href="https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=Inter:wght@400;500;600;700&display=swap"
+          href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Syne:wght@700;800&family=DM+Sans:wght@400;500;600&display=swap"
           rel="stylesheet"
         />
         <style dangerouslySetInnerHTML={{
