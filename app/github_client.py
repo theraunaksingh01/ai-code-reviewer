@@ -65,6 +65,7 @@ def get_pr_diff(repo_name: str, pr_number: int):
         "head_branch": pr.head.ref,
         "pr_author": pr.user.login,  
         "installation_id": installation_id, 
+        "head_sha": pr.head.sha,
         "files": files
     }
 
@@ -94,3 +95,26 @@ def post_review_comment(repo_name: str, pr_number: int, comments: list, summary:
             pr.create_issue_comment(
                 f"**{comment['filename']} (line {comment['line']}):**\n\n{comment['body']}"
             )
+            
+
+def post_quality_gate(repo_name: str, sha: str, quality_score: float, critical_count: int):
+    """Post a GitHub commit status check based on quality score."""
+    client = get_github_client(repo_name)
+    repo = client.get_repo(repo_name)
+
+    THRESHOLD = 60
+    passed = quality_score >= THRESHOLD and critical_count == 0
+
+    state = "success" if passed else "failure"
+    description = (
+        f"Quality score: {int(quality_score)}/100 — {'Passed ✓' if passed else 'Failed ✗ (score below threshold or critical issues found)'}"
+    )
+
+    repo.get_commit(sha).create_status(
+        state=state,
+        target_url="https://github.com",
+        description=description,
+        context="CodeSentinel / quality-gate"
+    )
+
+    print(f"{'✅' if passed else '❌'} Quality gate posted — {state} ({int(quality_score)}/100)")

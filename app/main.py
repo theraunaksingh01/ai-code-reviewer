@@ -199,8 +199,22 @@ async def handle_pr_review(repo_name: str, pr_number: int):
             db.commit()
             print(f"💾 Review saved to database — Quality Score: {quality_score}/100")
             
+            # Post quality gate status check to GitHub
+            print(f"🔍 head_sha = {pr_data.get('head_sha')}")
+            try:
+                from app.github_client import post_quality_gate
+                post_quality_gate(
+                    repo_name=repo_name,
+                    sha=pr_data.get("head_sha"),
+                    quality_score=quality_score,
+                    critical_count=severity_counts["CRITICAL"]
+                )
+            except Exception as qg_err:
+                print(f"⚠️ Quality gate failed (non-fatal): {qg_err}")
+            
             # Auto-fix: trigger if CRITICAL or HIGH issues found
-            if severity_counts["CRITICAL"] + severity_counts["HIGH"] > 0:
+            if severity_counts["CRITICAL"] + severity_counts["HIGH"] > 0 and pr_data.get("action") == "opened":
+
                 try:
                     from app.auto_fix import create_fix_pr
                     from app.github_client import get_installation_token
@@ -242,7 +256,8 @@ async def handle_pr_review(repo_name: str, pr_number: int):
                     print(f"✅ Auto-fix result: {fix_result}")
 
                 except Exception as fix_err:
-                    print(f"⚠️ Auto-fix failed (non-fatal): {fix_err}")
+                    if "422" not in str(fix_err):
+                        print(f"⚠️ Auto-fix failed (non-fatal): {fix_err}")
 
         except Exception as e:
             print(f"❌ Database save failed: {e}")
