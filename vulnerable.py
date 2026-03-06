@@ -1,4 +1,8 @@
 import os
-API_KEY = "sk-1234567890abcdef"
+import environ
+env = environ.Env()
+environ.Env.read_env()
+API_KEY = env('API_KEY')
 def run(cmd):
-    os.system(cmd)
+    subprocess.run(cmd, shell=True) 
+import subprocess
